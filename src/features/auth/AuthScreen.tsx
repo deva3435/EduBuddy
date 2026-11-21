@@ -157,12 +157,14 @@ export function AuthScreen({
             {loadError && <p className="auth-error" role="alert">{loadError}</p>}
             <div className="auth-actions">
               <button className="auth-primary-button" type="button" onClick={() => changeView('login')} disabled={Boolean(loadError)}>
-                Sign in <ArrowRight size={16} />
+                Student or teacher sign in <ArrowRight size={16} />
               </button>
               <button className="auth-secondary-button" type="button" onClick={() => changeView('signup')} disabled={Boolean(loadError)}>
                 Create an account
               </button>
             </div>
+            <p className="auth-role-helper">Teachers can sign in with an existing account or create one as a teacher.</p>
+            <p className="auth-switch-note">New teacher? <button type="button" onClick={() => { setRole('teacher'); changeView('signup'); }} disabled={Boolean(loadError)}>Create a teacher account</button></p>
             {accountCount > 0 && <p className="auth-account-note">{accountCount} local account{accountCount === 1 ? '' : 's'} available on this browser.</p>}
             <p className="auth-privacy-note"><ShieldCheck size={14} /> Passwords are locally hashed. This is not a server-authenticated account.</p>
           </>}
@@ -170,8 +172,8 @@ export function AuthScreen({
           {view === 'login' && <>
             <button className="auth-back-button" type="button" onClick={() => changeView('welcome')}><ArrowLeft size={15} /> Back</button>
             <span className="auth-kicker">WELCOME BACK</span>
-            <h2>Sign in to your account</h2>
-            <p className="auth-card-description">Use the email and password for your EduBuddy account on this browser.</p>
+            <h2>Student or teacher sign in</h2>
+            <p className="auth-card-description">Use the email and password for your account on this browser. EduBuddy recognizes your saved role and opens the matching workspace.</p>
             {error && <p className="auth-error" role="alert">{error}</p>}
             {loadError && <p className="auth-error" role="alert">{loadError}</p>}
             <form className="auth-form" onSubmit={submitLogin}>
@@ -190,6 +192,7 @@ export function AuthScreen({
             {error && <p className="auth-error" role="alert">{error}</p>}
             {loadError && <p className="auth-error" role="alert">{loadError}</p>}
             <form className="auth-form auth-signup-form" onSubmit={submitSignup}>
+              <span className="auth-role-label">I’m creating an account as</span>
               <div className="auth-role-picker" role="group" aria-label="Choose account role">
                 <button type="button" className={role === 'student' ? 'selected' : ''} aria-pressed={role === 'student'} onClick={() => setRole('student')}><GraduationCap size={18} /><span><strong>Student</strong><small>Learn and track progress</small></span></button>
                 <button type="button" className={role === 'teacher' ? 'selected' : ''} aria-pressed={role === 'teacher'} onClick={() => setRole('teacher')}><Users size={18} /><span><strong>Teacher</strong><small>Manage classroom work</small></span></button>

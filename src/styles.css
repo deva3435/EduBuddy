@@ -279,3 +279,23 @@ html[data-theme="dark"] .pomo-notice{border-color:#285443}
 .dash-quote-wrap .dq-root{width:100%}
 .dash-quote-wrap .dq-card{border-radius:var(--radius);box-shadow:var(--shadow)}
 @media(max-width:850px){.dash-quote-wrap{margin-bottom:22px}}
+
+.pomo-dash-card{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:14px 18px;padding:15px 18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow)}
+.pomo-dash-left{display:flex;flex:1 1 190px;align-items:center;gap:24px;min-width:0}
+.pomo-dash-session{display:grid;justify-items:start;gap:6px;min-width:112px}
+.pomo-dash-label{color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.8px}
+.pomo-dash-badge{padding:4px 9px;border-radius:999px;color:var(--green-dark);background:var(--green-soft);font-size:10px;font-weight:750}
+.pomo-dash-badge.short,.pomo-dash-badge.long{color:#87671f;background:#fff4d9}
+.pomo-dash-time{color:var(--text);font:800 clamp(28px,3vw,36px)/1 'Plus Jakarta Sans',sans-serif;letter-spacing:-1.5px;font-variant-numeric:tabular-nums}
+.pomo-dash-status{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;font-weight:600}
+.pomo-dash-status::before{width:7px;height:7px;border-radius:50%;background:#a5b2ac;content:""}
+.pomo-dash-status.running::before{background:#1b9a72;box-shadow:0 0 0 3px color-mix(in srgb,#1b9a72 15%,transparent)}
+.pomo-dash-status.paused::before{background:#d39a24}
+.pomo-dash-right{display:flex;flex:0 1 285px;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px 14px;min-width:0}
+.pomo-dash-stat{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px;white-space:nowrap}
+.pomo-dash-stat svg{color:var(--green);flex-shrink:0}
+.pomo-dash-stat strong{color:var(--text);font-size:11px}
+.pomo-dash-action{min-width:126px;min-height:39px;justify-content:center;white-space:nowrap}
+html[data-theme="dark"] .pomo-dash-badge.short,html[data-theme="dark"] .pomo-dash-badge.long{color:#f3d37e;background:#40371f}
+@media(max-width:600px){.pomo-dash-card{gap:13px;padding:14px}.pomo-dash-left{flex-basis:100%;justify-content:space-between;gap:12px}.pomo-dash-session{min-width:0}.pomo-dash-time{font-size:32px}.pomo-dash-right{flex:1 1 100%;justify-content:space-between;gap:10px}.pomo-dash-action{min-width:120px}}
+@media(max-width:360px){.pomo-dash-card{padding:12px}.pomo-dash-right{align-items:flex-start;flex-direction:column}.pomo-dash-action{width:100%}}
