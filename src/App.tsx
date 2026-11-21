@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, ArrowDown, ArrowLeft, ArrowRight, BookOpen, Brain, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Coffee, Compass, FileDown, GraduationCap, History, Home, Layers3, Lightbulb, ListChecks, Menu, MessageCircle, MonitorPlay, Moon, MoreHorizontal, NotebookPen, Pause, Play, Plus, RefreshCw, RotateCcw, Send, Settings, SkipForward, Sparkles, Sun, Target, Timer, Trash2, Trophy, Award, Flame, Lock, X, Zap } from 'lucide-react';
+import { Activity, ArrowDown, ArrowLeft, ArrowRight, BookOpen, Brain, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Coffee, Compass, FileDown, GraduationCap, History, Home, Layers3, Library, Lightbulb, ListChecks, LogOut, Menu, MessageCircle, MonitorPlay, Moon, MoreHorizontal, NotebookPen, Pause, Play, Plus, RefreshCw, RotateCcw, School, Send, Settings, SkipForward, Sparkles, Sun, Target, Timer, Trash2, Trophy, Award, Flame, Lock, X, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { exportNotesPdf } from './pdfExport';
 import { rankVideos, rankPlaylists, fmtViews, fmtDuration, fmtDate, type VideoItem, type PlaylistItem, type SavedResource, type RankedVideo } from './videoRank';
 import VisualLearningStudio from './visuals/VisualLearningStudio';
 import { VISUAL_CATALOG } from './visuals/catalog';
+import { BookmarksPage } from './features/bookmarks';
+import './features/bookmarks/BookmarksPage.css';
+import { FormulaSheetsPage } from './features/formula-sheets';
+import { DailyChallenge, type DailyChallengeResult } from './features/daily-challenge';
+import { ExamCountdown } from './features/exam-countdown';
+import { DailyQuote } from './features/daily-quote';
+import { ReferenceBooksPage } from './features/reference-books';
+import type { Board as ReferenceBookBoard, ClassGrade } from './features/reference-books/types';
+import { TeacherDashboard } from './features/teacher-dashboard';
+import { AuthScreen } from './features/auth/AuthScreen';
+import { AccountProfilePanel } from './features/auth/AccountProfilePanel';
+import { useLocalAuth } from './features/auth/useLocalAuth';
+import type { AccountProfileUpdate } from './features/auth/types';
 
 type Profile = { name: string; grade: string; board: string; subjects: string[]; preference: string };
 type Message = { role: 'user' | 'assistant'; content: string; demo?: boolean };
@@ -29,9 +42,20 @@ const defaultGamification = (): Gamification => ({ xp: 0, xpToday: 0, xpDate: ''
 const defaultPomodoro = (): PomodoroState => ({ prefs: { focusMin: 25, shortMin: 5, longMin: 15, autoSwitch: true, longBreakEvery4: true }, runtime: { status: 'idle', mode: 'focus', sessionId: '', startedAt: '', endsAt: 0, remainingSec: 25 * 60, durationSec: 25 * 60, cycleCount: 0, subject: '', topic: '', notes: '', taskId: '' }, history: [] });
 const emptyStore: Store = { profile: null, chats: [], results: [], tasks: [], topics: [], cards: [], theme: 'light', revisions: [], mistakes: [], savedResources: [], savedVisuals: [], completedVisuals: [], gamification: defaultGamification(), pomodoro: defaultPomodoro() };
 const subjects = ['Mathematics', 'Science', 'English', 'Social Studies', 'Physics', 'Chemistry', 'Biology', 'Computer Science', 'History', 'Geography', 'Economics'];
+const toReferenceClass = (grade: string): ClassGrade | undefined => /^Class (?:[1-9]|1[0-2])$/.test(grade) ? grade as ClassGrade : undefined;
+const toReferenceBoard = (board: string): ReferenceBookBoard | undefined => {
+  if (board === 'Other / custom') return 'Other';
+  return ['CBSE', 'ICSE', 'State Board', 'Other'].includes(board) ? board as ReferenceBookBoard : undefined;
+};
 const nav = [
   { id: 'dashboard', label: 'Dashboard', icon: Home },
   { id: 'visuals', label: 'Visual Studio', icon: Compass },
+  { id: 'daily-challenge', label: 'Daily Challenge', icon: Target },
+  { id: 'formula-sheets', label: 'Formula Sheets', icon: Layers3 },
+  { id: 'bookmarks', label: 'Saved resources', icon: BookOpen },
+  { id: 'exam-countdown', label: 'Exam Countdown', icon: CalendarDays },
+  { id: 'reference-books', label: 'Reference Books', icon: Library },
+  { id: 'daily-quote', label: 'Daily Quote', icon: Sparkles },
   { id: 'learn', label: 'Learn', icon: BookOpen },
   { id: 'buddy', label: 'Buddy AI', icon: MessageCircle },
   { id: 'practice', label: 'Practice', icon: Target },
@@ -184,6 +208,7 @@ function applyGamification(store: Store, ev: GamEvent): Store {
 
 export default function App() {
   const [store, setStore] = useState<Store>(loadStore);
+  const auth = useLocalAuth();
   const [page, setPage] = useState('dashboard');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [topic, setTopic] = useState('');
@@ -227,13 +252,68 @@ export default function App() {
   const [retryPick, setRetryPick] = useState<number | null>(null);
   const [retryResult, setRetryResult] = useState<'correct' | 'wrong' | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [profileSyncError, setProfileSyncError] = useState('');
+  const profileSyncAccountId = useRef<string | null>(null);
   const [pomoNow, setPomoNow] = useState(Date.now());
   const [pomoNotice, setPomoNotice] = useState('');
   const pomoCompleting = useRef<string | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const profile = store.profile;
+  const account = auth.account;
+  const accountStudent = account?.role === 'student' ? account.studentProfile : undefined;
+  const accountStudentSubjects = accountStudent?.subjects.join('\u0000') || '';
   useEffect(() => { localStorage.setItem('edubuddy-v1', JSON.stringify(store)); document.documentElement.dataset.theme = store.theme; }, [store]);
   useEffect(() => { if (profile) setProfileDraft(profile); }, [profile]);
+  useEffect(() => {
+    if (!account || account.role !== 'student' || !account.studentProfile) {
+      profileSyncAccountId.current = null;
+      return;
+    }
+
+    const accountProfile = {
+      name: account.fullName,
+      grade: account.studentProfile.grade,
+      board: account.studentProfile.board,
+      subjects: [...account.studentProfile.subjects],
+      preference: account.studentProfile.preference,
+    };
+    if (profileSyncAccountId.current !== account.id) {
+      profileSyncAccountId.current = account.id;
+      setStore(current => ({ ...current, profile: accountProfile }));
+      setProfileSyncError('');
+      return;
+    }
+    if (!profile) return;
+
+    if (!profile.name.trim()) {
+      setStore(current => ({ ...current, profile: current.profile ? { ...current.profile, name: account.fullName } : accountProfile }));
+      return;
+    }
+    const matchesAccount = profile.name === account.fullName
+      && profile.grade === accountProfile.grade
+      && profile.board === accountProfile.board
+      && profile.preference === accountProfile.preference
+      && profile.subjects.join('\u0000') === accountStudentSubjects;
+    if (matchesAccount) {
+      setProfileSyncError('');
+      return;
+    }
+    try {
+      auth.updateProfile({
+        fullName: profile.name.trim(),
+        schoolName: account.schoolName,
+        studentProfile: {
+          grade: profile.grade,
+          board: profile.board as typeof accountProfile.board,
+          subjects: [...profile.subjects],
+          preference: profile.preference,
+        },
+      });
+      setProfileSyncError('');
+    } catch (reason) {
+      setProfileSyncError(reason instanceof Error ? reason.message : 'Account profile changes could not be saved.');
+    }
+  }, [account, accountStudentSubjects, auth.updateProfile, profile]);
   useEffect(() => { fetch('/api/health').then(r => r.json()).then(d => setAiMode(d.mode)).catch(() => setAiMode('unknown')); }, []);
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, busy]);
   const firstName = profile?.name?.trim().split(' ')[0] || 'there';
@@ -311,7 +391,48 @@ export default function App() {
   const quizFromTopic = (t: string) => { setQuizTopic(t); openPage('practice'); };
   const saveResource = (r: Omit<SavedResource, 'id' | 'date'>) => setStore(s => s.savedResources.some(x => x.url === r.url) ? s : { ...s, savedResources: [{ ...r, id: id(), date: new Date().toISOString() }, ...s.savedResources] });
   const removeResource = (rid: string) => setStore(s => ({ ...s, savedResources: s.savedResources.filter(x => x.id !== rid) }));
+  const removeBookmarkResource = (rid: string) => setStore(s => ({
+    ...s,
+    savedResources: s.savedResources.filter(x => x.id !== rid),
+    savedVisuals: (s.savedVisuals || []).filter(visId => visId !== rid),
+  }));
+  const completeDailyChallenge = (result: DailyChallengeResult) => {
+    setStore(s => applyGamification(s, {
+      awards: [
+        { label: 'Completed today’s Daily Challenge', xp: 20, key: `daily-challenge:${result.challengeId}` },
+        ...(result.correctCount === result.total
+          ? [{ label: 'Daily Challenge perfect score', xp: 10, key: `daily-challenge-perfect:${result.challengeId}` }]
+          : []),
+      ],
+      streak: true,
+      stats: { dailyChallenges: 1, dailyChallengeCorrect: result.correctCount },
+    }));
+  };
   const saveProfile = (p: Profile) => setStore(s => ({ ...s, profile: p }));
+  const updateAccountProfile = (update: AccountProfileUpdate) => {
+    const updated = auth.updateProfile(update);
+    const updatedStudentProfile = updated.studentProfile;
+    if (updated.role === 'student' && updatedStudentProfile) {
+      setStore(current => ({
+        ...current,
+        profile: {
+          name: updated.fullName,
+          grade: updatedStudentProfile.grade,
+          board: updatedStudentProfile.board,
+          subjects: [...updatedStudentProfile.subjects],
+          preference: updatedStudentProfile.preference,
+        },
+      }));
+    }
+    return updated;
+  };
+  const logout = () => {
+    try {
+      auth.logout();
+    } catch (reason) {
+      window.alert(reason instanceof Error ? reason.message : 'Sign out failed. Please try again.');
+    }
+  };
   const openPage = (p: string) => { setPage(p); setMobileOpen(false); setError(''); };
   const runMaterial = async (kind: string, selectedTopic = topic) => { if (!selectedTopic.trim()) { setError('Add a topic first so Buddy knows what to help you learn.'); return; } setBusy(true); setError(''); setMaterial(''); setLearnTab(kind); try { const data = await askAI(kind === 'Learn' || kind === 'Examples' ? 'explain' : 'notes', { topic: selectedTopic, subject, level, profile, mode: kind }); setMaterial(data.content); setStore(s => ({ ...s, topics: [selectedTopic, ...s.topics.filter(t => t.toLowerCase() !== selectedTopic.toLowerCase())].slice(0, 12) })); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
   const sendChat = async (text = chatInput) => { const value = text.trim(); if (!value || busy) return; const next = [...messages, { role: 'user' as const, content: value }]; setMessages(next); setChatInput(''); setBusy(true); setError(''); try { const data = await askAI('chat', { message: value, history: next.slice(-12), profile, mode }); setMessages([...next, { role: 'assistant', content: data.content, demo: data.demo }]); } catch (e: any) { setError(e.message); } finally { setBusy(false); } };
@@ -371,12 +492,14 @@ export default function App() {
   const startPomodoro = (mode: PomodoroMode = pomo.runtime.mode) => {
     const durationSec = pomoModeDur(mode);
     const sid = `${mode}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-    const nowIso = new Date().toISOString();
-    updatePomodoro(p => ({ ...p, runtime: { ...p.runtime, status: 'running', mode, sessionId: sid, startedAt: nowIso, endsAt: Date.now() + durationSec * 1000, remainingSec: durationSec, durationSec } }));
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    setPomoNow(now);
+    updatePomodoro(p => ({ ...p, runtime: { ...p.runtime, status: 'running', mode, sessionId: sid, startedAt: nowIso, endsAt: now + durationSec * 1000, remainingSec: durationSec, durationSec } }));
     setPomoNotice(mode === 'focus' ? 'Focus session started.' : mode === 'short' ? 'Short break started.' : 'Long break started.');
   };
   const pausePomodoro = () => { if (pomo.runtime.status !== 'running') return; const remaining = Math.max(1, Math.ceil((pomo.runtime.endsAt - Date.now()) / 1000)); updatePomodoro(p => ({ ...p, runtime: { ...p.runtime, status: 'paused', endsAt: 0, remainingSec: remaining } })); setPomoNotice('Timer paused.'); };
-  const resumePomodoro = () => { if (pomo.runtime.status !== 'paused') return; const remaining = Math.max(1, pomo.runtime.remainingSec || pomo.runtime.durationSec || pomoModeDur(pomo.runtime.mode)); updatePomodoro(p => ({ ...p, runtime: { ...p.runtime, status: 'running', endsAt: Date.now() + remaining * 1000, remainingSec: remaining } })); setPomoNotice('Timer resumed.'); };
+  const resumePomodoro = () => { if (pomo.runtime.status !== 'paused') return; const remaining = Math.max(1, pomo.runtime.remainingSec || pomo.runtime.durationSec || pomoModeDur(pomo.runtime.mode)); const now = Date.now(); setPomoNow(now); updatePomodoro(p => ({ ...p, runtime: { ...p.runtime, status: 'running', endsAt: now + remaining * 1000, remainingSec: remaining } })); setPomoNotice('Timer resumed.'); };
   const resetPomodoroSession = () => { const durationSec = pomoModeDur(pomo.runtime.mode); updatePomodoro(p => ({ ...p, runtime: { ...p.runtime, status: 'idle', sessionId: '', startedAt: '', endsAt: 0, remainingSec: durationSec, durationSec } })); pomoCompleting.current = null; setPomoNotice('Current session reset.'); };
   const switchPomodoroMode = (mode: PomodoroMode) => { const durationSec = pomoModeDur(mode); updatePomodoro(p => ({ ...p, runtime: { ...p.runtime, status: 'idle', mode, sessionId: '', startedAt: '', endsAt: 0, remainingSec: durationSec, durationSec } })); pomoCompleting.current = null; setPomoNotice(mode === 'focus' ? 'Switched to Focus.' : mode === 'short' ? 'Switched to Short Break.' : 'Switched to Long Break.'); };
   const completePomodoroSession = (runtime: PomodoroRuntime) => {
@@ -428,7 +551,33 @@ export default function App() {
     }
     return { ...p, prefs, runtime };
   });
-    if (!profile) return <Onboarding profile={profileDraft} setProfile={setProfileDraft} onSave={() => saveProfile(profileDraft)} />;
+    if (!account) return <AuthScreen
+      theme={store.theme}
+      accountCount={auth.accountCount}
+      loadError={auth.loadError}
+      legacyStudentDefaults={auth.accountCount === 0 && profile ? {
+        fullName: profile.name,
+        grade: profile.grade,
+        board: profile.board as 'CBSE' | 'ICSE' | 'State Board' | 'Other / custom',
+        subjects: [...profile.subjects],
+        preference: profile.preference,
+      } : undefined}
+      onToggleTheme={() => setStore(current => ({ ...current, theme: current.theme === 'light' ? 'dark' : 'light' }))}
+      onLogin={auth.login}
+      onSignUp={auth.signUp}
+    />;
+    if (account.role === 'teacher') return <TeacherDashboard
+      theme={store.theme}
+      identity={{ fullName: account.fullName, email: account.email, schoolName: account.schoolName }}
+      onLogout={logout}
+    />;
+    const accountProfileReady = Boolean(profile && accountStudent
+      && profile.name === account.fullName
+      && profile.grade === accountStudent.grade
+      && profile.board === accountStudent.board
+      && profile.preference === accountStudent.preference
+      && profile.subjects.join('\u0000') === accountStudentSubjects);
+    if (!profile || !accountStudent || !accountProfileReady) return <div className="auth-loading" role="status">Loading your learning profile…</div>;
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="brand"><div className="brand-mark"><Sparkles size={19} /></div><span>EduBuddy</span><button className="icon-btn mobile-close" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
@@ -440,8 +589,26 @@ export default function App() {
     <main className="main-area"><header className="topbar"><button className="icon-btn mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu size={20} /></button><div className="breadcrumbs">My workspace <ChevronRight size={14} /> <strong>{nav.find(n => n.id === page)?.label || 'Settings'}</strong></div><div className="topbar-actions"><span className={`mode-pill ${aiMode === 'live' ? 'live' : ''}`}><span />{aiMode === 'live' ? 'AI connected' : aiMode === 'demo' ? 'Demo mode' : 'Checking AI'}</span><button className="icon-btn" onClick={() => setStore(s => ({ ...s, theme: s.theme === 'light' ? 'dark' : 'light' }))} aria-label="Toggle theme">{store.theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</button></div></header>
       <div className="page-wrap">
         {error && <div className="alert"><CircleHelp size={17} /><span>{error}</span><button onClick={() => setError('')}><X size={16} /></button></div>}
-        {page === 'dashboard' && <Dashboard firstName={firstName} profile={profile} store={store} average={average} completed={completed} subjectList={subjectList} onNavigate={openPage} onSubject={(s: string) => setSubject(s)} onTopic={(t: string) => { setTopic(t); openPage('learn'); }} pomoRemaining={pomoRemaining} pomoStatus={pomo.runtime.status} pomoMode={pomo.runtime.mode} pomoTodayMinutes={pomoTodayMinutes} onStartFocus={() => { openPage('pomodoro'); startPomodoro('focus'); }} />}
+        {profileSyncError && <div className="alert" role="alert"><CircleHelp size={17} /><span>{profileSyncError}</span><button onClick={() => setProfileSyncError('')}><X size={16} /></button></div>}
+        {page === 'settings' && account && <AccountProfilePanel account={account} onSave={updateAccountProfile} onLogout={logout} />}
+        {page === 'dashboard' && <><div className="student-account-context"><span><School size={14} /> {account.schoolName}</span><span><GraduationCap size={14} /> {profile.grade} · {profile.board}</span></div><Dashboard firstName={firstName} profile={profile} store={store} average={average} completed={completed} subjectList={subjectList} onNavigate={openPage} onSubject={(s: string) => setSubject(s)} onTopic={(t: string) => { setTopic(t); openPage('learn'); }} pomoRemaining={pomoRemaining} pomoStatus={pomo.runtime.status} pomoMode={pomo.runtime.mode} pomoTodayMinutes={pomoTodayMinutes} onStartFocus={() => startPomodoro(pomo.runtime.mode)} onPauseFocus={pausePomodoro} onResumeFocus={resumePomodoro} theme={store.theme} /></>}
         {page === 'visuals' && <VisualLearningStudio profile={profile} savedVisualIds={store.savedVisuals || []} completedVisualIds={(store.completedVisuals || []).map(x => x.id)} onToggleBookmark={toggleBookmarkVisual} onCompleteExperience={completeVisual} onNavigateTopic={learnFromTopic} askAI={askAI} />}
+        {page === 'daily-challenge' && <DailyChallenge theme={store.theme} onComplete={completeDailyChallenge} />}
+        {page === 'formula-sheets' && <FormulaSheetsPage
+          initialGrade={profile?.grade}
+          initialSubject={profile?.subjects?.includes('Mathematics') ? 'mathematics' : profile?.subjects?.includes('Physics') ? 'physics' : profile?.subjects?.includes('Chemistry') ? 'chemistry' : 'all'}
+          onNavigateTopic={learnFromTopic}
+          onNavigateQuiz={(topic: string) => quizFromTopic(topic)}
+        />}
+        {page === 'bookmarks' && <BookmarksPage
+          savedResources={store.savedResources || []}
+          savedVisualIds={store.savedVisuals || []}
+          onRemove={removeBookmarkResource}
+          onOpen={(url: string, title: string) => window.open(url, '_blank', 'noopener,noreferrer')}
+        />}
+        {page === 'exam-countdown' && <ExamCountdown theme={store.theme} />}
+        {page === 'reference-books' && <ReferenceBooksPage initialGrade={toReferenceClass(profile.grade)} initialBoard={toReferenceBoard(profile.board)} />}
+        {page === 'daily-quote' && <DailyQuote theme={store.theme} />}
         {page === 'learn' && <section><PageHeading eyebrow="YOUR CLASSROOM" title="What would you like to learn?" subtitle="Explore a subject or jump straight into a topic. Buddy will meet you at your level." /><div className="learn-layout"><div className="panel learn-controls"><label className="field-label">SUBJECT</label><div className="subject-grid">{subjectList.map(s => <button key={s} onClick={() => setSubject(s)} className={`subject-chip ${subject === s ? 'selected' : ''}`}>{s}</button>)}</div><label className="field-label space-top">TOPIC OR CHAPTER</label><div className="search-field"><BookOpen size={18} /><input value={topic} onChange={e => setTopic(e.target.value)} onKeyDown={e => e.key === 'Enter' && runMaterial('Learn')} placeholder="e.g. Electricity, Fractions, Photosynthesis" /></div><label className="field-label space-top">EXPLANATION LEVEL</label><div className="segmented">{[['simple','Super simple'],['school','School level'],['deep','Deep dive']].map(([v,l]) => <button key={v} className={level === v ? 'chosen' : ''} onClick={() => setLevel(v)}>{l}</button>)}</div><button className="btn btn-primary full-btn" disabled={busy} onClick={() => runMaterial('Learn')}>{busy ? <span className="spinner" /> : <Sparkles size={17} />} Explain this topic</button><div className="recent-topics"><span className="field-label">RECENT TOPICS</span>{store.topics.length ? store.topics.slice(0, 5).map(t => <button key={t} onClick={() => setTopic(t)}><Clock3 size={14} />{t}<ArrowRight size={14} /></button>) : <p>Your explored topics will appear here.</p>}</div></div><div className="panel material-panel"><div className="tabs">{['Learn','Notes','Examples'].map(t => <button key={t} className={learnTab === t ? 'tab-active' : ''} onClick={() => { setLearnTab(t); if (topic) runMaterial(t); }}>{t}</button>)}</div>{busy ? <LoadingState text="Buddy is preparing your learning material..." /> : material ? <div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{material}</ReactMarkdown></div> : <div className="empty-state"><div className="empty-illustration"><Lightbulb size={34} /></div><h3>Your next “aha!” moment starts here</h3><p>Choose a subject, enter a topic and Buddy will create a clear explanation just for your class.</p><div className="suggestion-row">{['Electricity','Fractions','The water cycle'].map(t => <button onClick={() => setTopic(t)}>{t}</button>)}</div></div>}<div className="material-footer">{material && <button className="btn btn-soft" onClick={exportNotes} disabled={pdfBusy}>{pdfBusy ? <span className="spinner" /> : <FileDown size={16} />} {pdfBusy ? 'Preparing PDF…' : 'Export PDF'}</button>}<button className="btn btn-soft" onClick={() => { setMode('school'); openPage('buddy'); setMessages([]); }}> <MessageCircle size={16} /> Ask Buddy</button><button className="btn btn-soft" onClick={() => { setQuizTopic(topic || 'Electricity'); openPage('practice'); }}> <Target size={16} /> Practice this topic</button><button className="btn btn-soft" onClick={makeCards}><Layers3 size={16} /> Make flashcards</button></div></div></div></section>}
         {page === 'buddy' && <section><PageHeading eyebrow="YOUR AI LEARNING COMPANION" title="Hey, I'm Buddy! ✨" subtitle="No question is too small. Let's figure things out together." /><div className="buddy-layout"><div className="chat-panel panel"><div className="chat-top"><div className="buddy-avatar"><Sparkles size={20} /></div><div><strong>Buddy</strong><span><i /> Ready to help you learn</span></div><button className="btn btn-quiet chat-clear" onClick={() => setMessages([])}><RefreshCw size={14} /> New chat</button></div><div className="chat-messages">{messages.length === 0 && <div className="chat-welcome"><div className="welcome-orb"><Sparkles size={28} /></div><h3>What are we learning today?</h3><p>Ask me anything from your school subjects. I'll explain it at your level, one step at a time.</p><div className="prompt-grid">{[['Explain simply','Explain photosynthesis in simple words'],['Step by step','Solve a maths problem step by step'],['Give examples','Give me real-life examples of electricity'],['Quiz me','Quiz me on the topic I am studying']].map(([l,q]) => <button onClick={() => sendChat(q)}><span>{l}</span><ArrowUpRightIcon /></button>)}</div></div>}{messages.map((m,i) => <div className={`message ${m.role}`} key={i}><div className={`message-avatar ${m.role}`}>{m.role === 'assistant' ? <Sparkles size={15} /> : profile.name?.[0]?.toUpperCase() || 'S'}</div><div className="message-body"><div className="message-name">{m.role === 'assistant' ? 'Buddy' : profile.name || 'You'} {m.demo && <span className="demo-tag">DEMO</span>}</div><div className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div></div></div>)}{busy && <div className="message assistant"><div className="message-avatar assistant"><Sparkles size={15} /></div><div className="typing"><i /><i /><i /></div></div>}<div ref={chatEnd} /></div><div className="chat-compose"><div className="chat-mode-row"><span>Learning style</span>{[['simple','Simple'],['school','School'],['exam','Exam mode'],['deep','Deep dive']].map(([v,l]) => <button className={mode === v ? 'mode-selected' : ''} onClick={() => setMode(v)}>{l}</button>)}</div><div className="compose-box"><textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }} placeholder="Ask Buddy anything..." rows={1} /><button className="send-btn" onClick={() => sendChat()} disabled={!chatInput.trim() || busy}><Send size={17} /></button></div><p className="disclaimer">Buddy can make mistakes. Check important information with your teacher or textbook.</p></div></div><aside className="buddy-aside"><div className="panel aside-card"><div className="aside-icon purple"><Brain size={19} /></div><h3>Learn your way</h3><p>Choose a style that works best for you. Buddy adapts to your class and learning preferences.</p>{[['simple','Super simple','Everyday language & analogies'],['school','School level','Clear curriculum-style explanations'],['exam','Exam mode','Definitions, key points & practice'],['deep','Deep understanding','Go beyond the basics']].map(([v,l,d]) => <button className={`mode-option ${mode === v ? 'active' : ''}`} onClick={() => setMode(v)}><span><strong>{l}</strong><small>{d}</small></span>{mode === v && <CheckCircle2 size={17} />}</button>)}</div><div className="panel aside-card tip-card"><div className="aside-icon yellow"><Lightbulb size={18} /></div><h3>A little tip</h3><p>Try asking Buddy to explain a tricky idea using an example from everyday life.</p></div></aside></div></section>}
         {page === 'practice' && <section><PageHeading eyebrow="PRACTICE ARENA" title="Small steps. Big progress." subtitle="Test what you know, learn from mistakes and build confidence." />{!quiz ? <div className="practice-layout"><div className="panel quiz-setup"><div className="setup-icon"><Target size={23} /></div><h2>Build your practice quiz</h2><p>Choose what you want to practise. Buddy will create questions for your level.</p><label className="field-label">SUBJECT TOPIC</label><input className="form-input" value={quizTopic} onChange={e => setQuizTopic(e.target.value)} placeholder="e.g. Electricity" /><label className="field-label space-top">DIFFICULTY</label><div className="difficulty-options">{['Easy','Medium','Hard'].map(d => <button className={difficulty === d ? 'selected' : ''} onClick={() => setDifficulty(d)}>{d}</button>)}</div><label className="field-label space-top">NUMBER OF QUESTIONS</label><div className="segmented">{['5','8','10'].map(n => <button className={count === n ? 'chosen' : ''} onClick={() => setCount(n)}>{n} questions</button>)}</div><button className="btn btn-primary full-btn" disabled={busy} onClick={makeQuiz}>{busy ? <span className="spinner" /> : <Sparkles size={17} />} Generate my quiz</button><div className="safe-note"><CheckCircle2 size={15} /> Your score is saved on this device.</div></div><div className="practice-side"><div className="panel practice-promo"><div className="promo-orb"><Trophy size={29} /></div><h2>Progress, not perfection.</h2><p>Every question is a chance to understand something a little better. Take your time!</p></div><div className="panel recent-results"><h3>Recent quizzes</h3>{store.results.length ? store.results.slice(0, 4).map(r => <div className="result-line"><span><strong>{r.topic}</strong><small>{new Date(r.date).toLocaleDateString()}</small></span><b>{Math.round(r.score / r.total * 100)}%</b></div>) : <div className="mini-empty">Your completed quizzes will show up here.</div>}</div></div></div> : <div className="panel quiz-panel">{!quizDone ? <><div className="quiz-head"><div><span className="eyebrow">{quizTopic} · {difficulty}</span><h2>Let's see what you know</h2></div><button className="btn btn-quiet" onClick={resetQuiz}>Exit quiz</button></div><div className="quiz-progress"><span style={{ width: `${(Object.keys(answers).length / quiz.length) * 100}%` }} /></div><div className="question-meta">QUESTION {quizIndex + 1} OF {quiz.length}<span>{Object.keys(answers).length} answered</span></div><h2 className="question-title">{quiz[quizIndex].question}</h2><div className="answer-options">{quiz[quizIndex].options.map((o,i) => <button className={answers[quizIndex] === i ? 'picked' : ''} onClick={() => setAnswers(a => ({ ...a, [quizIndex]: i }))}><span>{String.fromCharCode(65+i)}</span>{o}{answers[quizIndex] === i && <Check size={17} />}</button>)}</div><div className="quiz-navigation"><button className="btn btn-soft" disabled={quizIndex === 0} onClick={() => setQuizIndex(i => i - 1)}><ChevronLeft size={16} /> Previous</button>{quizIndex < quiz.length - 1 ? <button className="btn btn-primary" disabled={answers[quizIndex] === undefined} onClick={() => setQuizIndex(i => i + 1)}>Next question <ChevronRight size={16} /></button> : <button className="btn btn-primary" disabled={Object.keys(answers).length !== quiz.length} onClick={submitQuiz}>Submit quiz <Check size={16} /></button>}</div></> : <QuizResults quiz={quiz} answers={answers} onRetry={resetQuiz} />}</div>}</section>}
@@ -461,12 +628,12 @@ function ArrowUpRightIcon() { return <ArrowRight size={15} />; }
 function PageHeading({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: string }) { return <div className="page-heading"><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{subtitle}</p></div>; }
 function LoadingState({ text }: { text: string }) { return <div className="loading-state"><span className="loader-orb"><Sparkles size={22} /></span><strong>{text}</strong><span>Putting the pieces together...</span></div>; }
 function Stat({ icon, label, value, tint }: { icon: React.ReactNode; label: string; value: string | number; tint: string }) { return <div className="panel stat-card"><div className={`stat-icon ${tint}`}>{icon}</div><span>{label}</span><strong>{value}</strong></div>; }
-function Dashboard({ firstName, profile, store, average, completed, subjectList, onNavigate, onSubject, onTopic, pomoRemaining, pomoStatus, pomoMode, pomoTodayMinutes, onStartFocus }: any) {
+function Dashboard({ firstName, profile, store, average, completed, subjectList, onNavigate, onSubject, onTopic, pomoRemaining, pomoStatus, pomoMode, pomoTodayMinutes, onStartFocus, onPauseFocus, onResumeFocus, theme }: any) {
   const pending = store.tasks.filter((t: Task) => !t.done).slice(0, 3);
   const fmtPomo = (sec: number) => { const s = Math.max(0, Math.floor(sec)); const m = Math.floor(s / 60); const r = s % 60; return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`; };
   const completedVisualsCount = (store.completedVisuals || []).length;
   const recommendedVisual = VISUAL_CATALOG.find((v: any) => (v.grades || []).includes(profile.grade)) || VISUAL_CATALOG[0];
-  return <section><div className="welcome-banner"><div><span className="eyebrow">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}</span><h1>Good morning, {firstName}! <span>☀️</span></h1><p>Ready to make today a little smarter? Let's learn something new.</p><div className="welcome-actions"><button className="btn btn-primary" onClick={() => onNavigate('buddy')}><Sparkles size={16} /> Ask Buddy</button><button className="btn btn-white" onClick={() => onNavigate('learn')}>Explore subjects <ArrowRight size={16} /></button></div></div><div className="welcome-art"><div className="art-sun" /><div className="art-book"><BookOpen size={52} /></div><div className="art-spark spark-one">✦</div><div className="art-spark spark-two">✧</div><div className="art-circle" /></div></div><div className="dashboard-stats"><div className="panel dash-stat"><div className="dash-stat-icon mint"><BookOpen size={18} /></div><div><strong>{store.topics.length}</strong><span>Topics explored</span></div></div><div className="panel dash-stat"><div className="dash-stat-icon purple"><Target size={18} /></div><div><strong>{store.results.length}</strong><span>Quizzes completed</span></div></div><div className="panel dash-stat"><div className="dash-stat-icon yellow"><Trophy size={18} /></div><div><strong>{store.results.length ? `${average}%` : '—'}</strong><span>Average score</span></div></div><div className="panel dash-stat"><div className="dash-stat-icon blue"><CheckCircle2 size={18} /></div><div><strong>{completed}</strong><span>Tasks completed</span></div></div></div><div className="dashboard-grid"><div className="dashboard-main"><div className="section-title"><div><span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span><h2>Continue learning</h2></div><button className="text-link" onClick={() => onNavigate('learn')}>Explore all <ArrowRight size={15} /></button></div><div className="continue-grid">{store.topics.length ? store.topics.slice(0, 2).map((t: string, i: number) => <button className="panel continue-card" onClick={() => onTopic(t)}><div className={`continue-icon ${i % 2 ? 'purple' : 'mint'}`}><BookOpen size={20} /></div><span className="eyebrow">RECENT TOPIC</span><strong>{t}</strong><small>Continue exploring <ArrowRight size={14} /></small></button>) : <div className="panel continue-empty"><div className="empty-illustration small"><Compass size={24} /></div><div><strong>Your learning journey starts here</strong><p>Choose a topic that interests you and Buddy will help you explore it.</p></div><button className="btn btn-soft" onClick={() => onNavigate('learn')}>Find a topic <ArrowRight size={15} /></button></div>}</div><div className="section-title"><div><span className="eyebrow">FOCUS TIMER</span><h2>Pomodoro</h2></div><button className="text-link" onClick={() => onNavigate('pomodoro')}>Open timer <ArrowRight size={15} /></button></div><div className="panel pomo-dash-card"><div className="pomo-dash-left"><div className={`pomo-dash-badge ${pomoMode}`}>{pomoMode === 'focus' ? 'Focus' : pomoMode === 'short' ? 'Short break' : 'Long break'}</div><div className="pomo-dash-time">{fmtPomo(pomoRemaining)}</div><span className={`pomo-dash-status ${pomoStatus}`}>{pomoStatus === 'running' ? 'Running' : pomoStatus === 'paused' ? 'Paused' : 'Ready'}</span></div><div className="pomo-dash-right"><div className="pomo-dash-stat"><Timer size={15}/> <span>Today</span> <strong>{pomoTodayMinutes} min</strong></div><button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); if (pomoStatus === 'running') onNavigate('pomodoro'); else (onStartFocus ? onStartFocus() : onNavigate('pomodoro')); }}><Play size={15}/> {pomoStatus === 'running' ? 'View timer' : 'Start focus'}</button></div></div><div className="section-title"><div><span className="eyebrow">VISUAL LEARNING STUDIO</span><h2>Interactive simulations</h2></div><button className="text-link" onClick={() => onNavigate('visuals')}>Explore all <ArrowRight size={15} /></button></div><div className="panel dash-visual-card" onClick={() => onNavigate('visuals')} style={{ cursor: 'pointer' }}><div className="dash-visual-head"><span className="badge-visual-type 3d"><Compass size={13} /> {recommendedVisual.badge || 'Interactive 3D & SVG'}</span><span className="task-count">{completedVisualsCount}/{VISUAL_CATALOG.length} completed</span></div><div className="dash-visual-preview"><div className="dash-visual-icon" style={{ background: recommendedVisual.gradient, color: '#fff', fontSize: '20px' }}>{recommendedVisual.icon}</div><div className="dash-visual-info"><strong>{recommendedVisual.title}</strong><span>{recommendedVisual.description}</span></div><button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); onNavigate('visuals'); }}>Launch <ArrowRight size={13} /></button></div></div><div className="section-title subject-title"><div><span className="eyebrow">MADE FOR YOUR CLASS</span><h2>Your subjects</h2></div><span className="class-pill"><GraduationCap size={14} /> {profile.grade} · {profile.board}</span></div><div className="subject-shortcuts">{subjectList.slice(0, 6).map((s: string, i: number) => <button className="panel subject-card" onClick={() => { onSubject(s); onTopic(''); onNavigate('learn'); }}><span className={`subject-symbol subject-${i % 5}`}>{['∑','⚛','Aa','◎','⌘'][i % 5]}</span><strong>{s}</strong><ArrowRight size={15} /></button>)}</div></div><aside className="dashboard-side"><GamCard store={store} /><div className="panel today-card"><div className="section-title"><div><span className="eyebrow">YOUR DAY</span><h3>Today's learning</h3></div><CalendarDays size={18} /></div>{pending.length ? pending.map((t: Task) => <div className="today-task"><span className="task-bullet" /><div><strong>{t.title}</strong><small>{t.day} · {t.type}</small></div></div>) : <div className="today-empty"><CheckCircle2 size={25} /><strong>You're all caught up!</strong><p>{store.tasks.length ? 'Nice work completing your tasks.' : 'Create a study plan to give your learning a little structure.'}</p></div>}<button className="text-link" onClick={() => onNavigate('planner')}>Open study planner <ArrowRight size={14} /></button></div><div className="buddy-promo"><div className="promo-stars">✦ ✧</div><div className="buddy-promo-icon"><Sparkles size={22} /></div><h3>Meet your study buddy</h3><p>Stuck on something? Get a friendly explanation, examples and step-by-step help.</p><button className="btn btn-white full-btn" onClick={() => onNavigate('buddy')}>Chat with Buddy <ArrowRight size={15} /></button></div></aside></div></section>; }
+  return <section><div className="welcome-banner"><div><span className="eyebrow">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}</span><h1>Good morning, {firstName}! <span>☀️</span></h1><p>Ready to make today a little smarter? Let's learn something new.</p><div className="welcome-actions"><button className="btn btn-primary" onClick={() => onNavigate('buddy')}><Sparkles size={16} /> Ask Buddy</button><button className="btn btn-white" onClick={() => onNavigate('learn')}>Explore subjects <ArrowRight size={16} /></button></div></div><div className="welcome-art"><div className="art-sun" /><div className="art-book"><BookOpen size={52} /></div><div className="art-spark spark-one">✦</div><div className="art-spark spark-two">✧</div><div className="art-circle" /></div></div><div className="dashboard-stats"><div className="panel dash-stat"><div className="dash-stat-icon mint"><BookOpen size={18} /></div><div><strong>{store.topics.length}</strong><span>Topics explored</span></div></div><div className="panel dash-stat"><div className="dash-stat-icon purple"><Target size={18} /></div><div><strong>{store.results.length}</strong><span>Quizzes completed</span></div></div><div className="panel dash-stat"><div className="dash-stat-icon yellow"><Trophy size={18} /></div><div><strong>{store.results.length ? `${average}%` : '—'}</strong><span>Average score</span></div></div><div className="panel dash-stat"><div className="dash-stat-icon blue"><CheckCircle2 size={18} /></div><div><strong>{completed}</strong><span>Tasks completed</span></div></div></div><div className="dashboard-grid"><div className="dashboard-main"><div className="section-title"><div><span className="eyebrow">DAILY INSPIRATION</span><h2>Quote of the Day</h2></div></div><div className="dash-quote-wrap"><DailyQuote theme={theme} /></div><div className="section-title"><div><span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span><h2>Continue learning</h2></div><button className="text-link" onClick={() => onNavigate('learn')}>Explore all <ArrowRight size={15} /></button></div><div className="continue-grid">{store.topics.length ? store.topics.slice(0, 2).map((t: string, i: number) => <button className="panel continue-card" onClick={() => onTopic(t)}><div className={`continue-icon ${i % 2 ? 'purple' : 'mint'}`}><BookOpen size={20} /></div><span className="eyebrow">RECENT TOPIC</span><strong>{t}</strong><small>Continue exploring <ArrowRight size={14} /></small></button>) : <div className="panel continue-empty"><div className="empty-illustration small"><Compass size={24} /></div><div><strong>Your learning journey starts here</strong><p>Choose a topic that interests you and Buddy will help you explore it.</p></div><button className="btn btn-soft" onClick={() => onNavigate('learn')}>Find a topic <ArrowRight size={15} /></button></div>}</div><div className="feature-shortcuts"><button className="panel feature-shortcut" onClick={() => onNavigate('daily-challenge')}><span className="feature-shortcut-icon yellow"><Target size={17}/></span><span><strong>Daily Challenge</strong><small>Take today’s quick challenge</small></span><ArrowRight size={14}/></button><button className="panel feature-shortcut" onClick={() => onNavigate('formula-sheets')}><span className="feature-shortcut-icon mint"><Layers3 size={17}/></span><span><strong>Formula Sheets</strong><small>Search formulas and examples</small></span><ArrowRight size={14}/></button><button className="panel feature-shortcut" onClick={() => onNavigate('bookmarks')}><span className="feature-shortcut-icon purple"><BookOpen size={17}/></span><span><strong>Saved resources</strong><small>{(store.savedResources?.length || 0) + (store.savedVisuals?.length || 0)} items saved</small></span><ArrowRight size={14}/></button><button className="panel feature-shortcut" onClick={() => onNavigate('exam-countdown')}><span className="feature-shortcut-icon blue"><CalendarDays size={17}/></span><span><strong>Exam Countdown</strong><small>Plan exams and track syllabus</small></span><ArrowRight size={14}/></button><button className="panel feature-shortcut" onClick={() => onNavigate('reference-books')}><span className="feature-shortcut-icon yellow"><Library size={17}/></span><span><strong>Reference Books</strong><small>Books, question banks & free resources</small></span><ArrowRight size={14}/></button></div><div className="section-title"><div><span className="eyebrow">FOCUS TIMER</span><h2>Pomodoro</h2></div><button className="text-link" onClick={() => onNavigate('pomodoro')}>Open timer <ArrowRight size={15} /></button></div><div className="panel pomo-dash-card"><div className="pomo-dash-left"><div className="pomo-dash-session"><span className="pomo-dash-label">CURRENT SESSION</span><span className={`pomo-dash-badge ${pomoMode}`}>{pomoMode === 'focus' ? 'Focus' : pomoMode === 'short' ? 'Short break' : 'Long break'}</span><span className={`pomo-dash-status ${pomoStatus}`}>{pomoStatus === 'running' ? 'Running' : pomoStatus === 'paused' ? 'Paused' : 'Ready'}</span></div><div className="pomo-dash-time" role="timer" aria-label={`Time remaining ${fmtPomo(pomoRemaining)}`}>{fmtPomo(pomoRemaining)}</div></div><div className="pomo-dash-right"><div className="pomo-dash-stat"><Timer size={15}/><span>Today’s focus</span><strong>{pomoTodayMinutes} min</strong></div>{pomoStatus === 'running' ? <button className="btn btn-soft pomo-dash-action" onClick={onPauseFocus}><Pause size={15}/> Pause</button> : pomoStatus === 'paused' ? <button className="btn btn-primary pomo-dash-action" onClick={onResumeFocus}><Play size={15}/> Resume</button> : <button className="btn btn-primary pomo-dash-action" onClick={onStartFocus}><Play size={15}/> Start {pomoMode === 'focus' ? 'focus' : pomoMode === 'short' ? 'short break' : 'long break'}</button>}</div></div><div className="section-title"><div><span className="eyebrow">VISUAL LEARNING STUDIO</span><h2>Interactive simulations</h2></div><button className="text-link" onClick={() => onNavigate('visuals')}>Explore all <ArrowRight size={15} /></button></div><div className="panel dash-visual-card" onClick={() => onNavigate('visuals')} style={{ cursor: 'pointer' }}><div className="dash-visual-head"><span className="badge-visual-type 3d"><Compass size={13} /> {recommendedVisual.badge || 'Interactive 3D & SVG'}</span><span className="task-count">{completedVisualsCount}/{VISUAL_CATALOG.length} completed</span></div><div className="dash-visual-preview"><div className="dash-visual-icon" style={{ background: recommendedVisual.gradient, color: '#fff', fontSize: '20px' }}>{recommendedVisual.icon}</div><div className="dash-visual-info"><strong>{recommendedVisual.title}</strong><span>{recommendedVisual.description}</span></div><button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); onNavigate('visuals'); }}>Launch <ArrowRight size={13} /></button></div></div><div className="section-title subject-title"><div><span className="eyebrow">MADE FOR YOUR CLASS</span><h2>Your subjects</h2></div><span className="class-pill"><GraduationCap size={14} /> {profile.grade} · {profile.board}</span></div><div className="subject-shortcuts">{subjectList.slice(0, 6).map((s: string, i: number) => <button className="panel subject-card" onClick={() => { onSubject(s); onTopic(''); onNavigate('learn'); }}><span className={`subject-symbol subject-${i % 5}`}>{['∑','⚛','Aa','◎','⌘'][i % 5]}</span><strong>{s}</strong><ArrowRight size={15} /></button>)}</div></div><aside className="dashboard-side"><GamCard store={store} /><div className="panel today-card"><div className="section-title"><div><span className="eyebrow">YOUR DAY</span><h3>Today's learning</h3></div><CalendarDays size={18} /></div>{pending.length ? pending.map((t: Task) => <div className="today-task"><span className="task-bullet" /><div><strong>{t.title}</strong><small>{t.day} · {t.type}</small></div></div>) : <div className="today-empty"><CheckCircle2 size={25} /><strong>You're all caught up!</strong><p>{store.tasks.length ? 'Nice work completing your tasks.' : 'Create a study plan to give your learning a little structure.'}</p></div>}<button className="text-link" onClick={() => onNavigate('planner')}>Open study planner <ArrowRight size={14} /></button></div><div className="buddy-promo"><div className="promo-stars">✦ ✧</div><div className="buddy-promo-icon"><Sparkles size={22} /></div><h3>Meet your study buddy</h3><p>Stuck on something? Get a friendly explanation, examples and step-by-step help.</p><button className="btn btn-white full-btn" onClick={() => onNavigate('buddy')}>Chat with Buddy <ArrowRight size={15} /></button></div></aside></div></section>; }
 function QuizResults({ quiz, answers, onRetry }: { quiz: Question[]; answers: Record<number, number>; onRetry: () => void }) { const score = quiz.reduce((n,q,i) => n + (answers[i] === q.answer ? 1 : 0), 0); return <div className="quiz-results"><div className="score-orb"><Trophy size={28} /></div><span className="eyebrow">QUIZ COMPLETE</span><h2>{score === quiz.length ? 'Perfect score! Brilliant work.' : score / quiz.length >= .6 ? 'Nice effort. Keep going!' : 'Every attempt helps you grow.'}</h2><div className="score-number">{score}<span>/{quiz.length}</span></div><p>You got {Math.round(score / quiz.length * 100)}% correct. Take a look at the explanations below.</p><div className="review-list">{quiz.map((q,i) => <div className={`review-item ${answers[i] === q.answer ? 'correct' : 'incorrect'}`}><div className="review-question"><span>{answers[i] === q.answer ? <CheckCircle2 size={17} /> : <CircleHelp size={17} />}</span><strong>{q.question}</strong></div><p><b>Your answer:</b> {q.options[answers[i]] || 'Not answered'}</p>{answers[i] !== q.answer && <p><b>Correct answer:</b> {q.options[q.answer]}</p>}<small>{q.explanation}</small></div>)}</div><button className="btn btn-primary" onClick={onRetry}><RefreshCw size={16} /> Try another quiz</button></div>; }
 function Onboarding({ profile, setProfile, onSave }: { profile: Profile; setProfile: (p: Profile) => void; onSave: () => void }) { const [step, setStep] = useState(0); const toggle = (s: string) => setProfile({ ...profile, subjects: profile.subjects.includes(s) ? profile.subjects.filter(x => x !== s) : [...profile.subjects, s] }); return <div className="onboarding"><div className="onboard-brand"><div className="brand-mark"><Sparkles size={19} /></div><strong>EduBuddy</strong></div><div className="onboard-card"><div className="onboard-progress"><span style={{ width: `${(step + 1) * 50}%` }} /></div><div className="onboard-content"><div className="onboard-emoji">{step === 0 ? '👋' : '📚'}</div><span className="eyebrow">LET'S GET TO KNOW YOU</span><h1>{step === 0 ? 'Welcome to EduBuddy!' : 'What are you learning?'}</h1><p>{step === 0 ? 'A couple of quick details will help Buddy make learning feel right for you.' : 'Pick the subjects you’re interested in. You can always change these later.'}</p>{step === 0 ? <><label className="field-label">WHAT SHOULD WE CALL YOU? <span className="optional">OPTIONAL</span></label><input className="form-input" value={profile.name} onChange={e => setProfile({ ...profile, name: e.target.value })} placeholder="Your name or nickname" /><label className="field-label space-top">WHICH CLASS ARE YOU IN?</label><select className="form-input" value={profile.grade} onChange={e => setProfile({ ...profile, grade: e.target.value })}>{Array.from({ length: 12 }, (_,i) => `Class ${i+1}`).map(g => <option>{g}</option>)}</select><label className="field-label space-top">YOUR BOARD</label><select className="form-input" value={profile.board} onChange={e => setProfile({ ...profile, board: e.target.value })}>{['CBSE','ICSE','State Board','Other / custom'].map(b => <option>{b}</option>)}</select></> : <><label className="field-label">CHOOSE YOUR SUBJECTS</label><div className="subject-grid onboard-subjects">{subjects.map(s => <button className={`subject-chip ${profile.subjects.includes(s) ? 'selected' : ''}`} onClick={() => toggle(s)}>{profile.subjects.includes(s) && <Check size={13} />}{s}</button>)}</div><label className="field-label space-top">HOW DO YOU LIKE TO LEARN?</label><select className="form-input" value={profile.preference} onChange={e => setProfile({ ...profile, preference: e.target.value })}>{['Step-by-step explanations','Simple explanations','Examples first','Exam-focused learning'].map(x => <option>{x}</option>)}</select></>}<div className="onboard-actions">{step === 1 && <button className="btn btn-soft" onClick={() => setStep(0)}><ArrowLeft size={16} /> Back</button>}<button className="btn btn-primary" onClick={() => step === 0 ? setStep(1) : onSave()} disabled={step === 1 && profile.subjects.length === 0}>{step === 0 ? 'Continue' : 'Start learning'} <ArrowRight size={16} /></button></div></div></div><p className="onboard-foot">No account needed. Your learning data is saved on this device.</p></div>; }
 
